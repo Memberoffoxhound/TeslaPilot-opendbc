@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - Highland
   pull_request:
 
 jobs:
