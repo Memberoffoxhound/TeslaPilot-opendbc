@@ -46,4 +46,7 @@ class CarInterface(CarInterfaceBase):
 
     ret.dashcamOnly = candidate in (CAR.TESLA_MODEL_X,)  # dashcam only, pending find invalidLkasSetting signal
 
+    # Cooperative steering: light driver torque adds steering angle instead of a full override
+    ret.flags |= TeslaFlags.COOP_STEERING.value
+
     return ret

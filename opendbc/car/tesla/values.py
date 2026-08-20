@@ -131,8 +131,10 @@ class TeslaFlags(IntFlag):
   LONG_CONTROL = 1
   FSD_14 = 2
   MISSING_DAS_SETTINGS = 4
+  COOP_STEERING = 8
 
 
 DBC = CAR.create_dbc_map()
 
 STEER_THRESHOLD = 1
+STEER_DISENGAGE_THRESHOLD = 5.0

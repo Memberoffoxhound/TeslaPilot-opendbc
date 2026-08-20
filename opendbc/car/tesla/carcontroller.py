@@ -5,6 +5,7 @@ from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CarControllerParams
+from opendbc.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.car.vehicle_model import VehicleModel
 
 
@@ -21,6 +22,7 @@ class CarController(CarControllerBase):
     self.apply_angle_last = 0
     self.packer = CANPacker(dbc_names[Bus.party])
     self.tesla_can = TeslaCAN(CP, self.packer)
+    self.coop_steer = CoopSteeringCarController()
 
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
@@ -32,14 +34,16 @@ class CarController(CarControllerBase):
     # Tesla EPS enforces disabling steering on heavy lateral override force.
     # When enabling in a tight curve, we wait until user reduces steering force to start steering.
     # Canceling is done on rising edge and is handled generically with CC.cruiseControl.cancel
-    lat_active = CC.latActive and CS.hands_on_level < 3
+    lat_active = CC.latActive and not CS.out.steeringDisengage
 
     if self.frame % 2 == 0:
       # Angular rate limit based on speed
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
 
-      can_sends.append(self.tesla_can.create_steering_control(self.apply_angle_last, lat_active))
+      # Cooperative steering: convert light driver torque into extra steering angle
+      apply_angle, lat_active = self.coop_steer.update(self.apply_angle_last, lat_active, self.CP, CS, self.VM)
+      can_sends.append(self.tesla_can.create_steering_control(apply_angle, lat_active))
 
     if self.frame % 10 == 0:
       can_sends.append(self.tesla_can.create_steering_allowed())

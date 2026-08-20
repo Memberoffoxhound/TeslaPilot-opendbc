@@ -1,11 +1,13 @@
 import copy
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.carlog import carlog
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.tesla.teslacan import get_steer_ctrl_type
-from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
+from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags
+
+ButtonType = structs.CarState.ButtonEvent.Type
 
 class CarState(CarStateBase):
   def __init__(self, CP):
@@ -21,6 +23,7 @@ class CarState(CarStateBase):
 
     self.hands_on_level = 0
     self.das_control = None
+    self.prev_acc_state = 0
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -62,8 +65,10 @@ class CarState(CarStateBase):
 
     # FSD disengages using union of handsOnLevel (slow overrides) and high angle rate faults (fast overrides, high speed)
     eac_error_code = self.can_define.dv["EPAS3S_sysStatus"]["EPAS3S_eacErrorCode"].get(int(epas_status["EPAS3S_eacErrorCode"]), None)
-    ret.steeringDisengage = self.hands_on_level >= 3 or (eac_status == "EAC_INHIBITED" and
+    eps_disengages = self.hands_on_level >= 3 or (eac_status == "EAC_INHIBITED" and
                                                          eac_error_code == "EAC_ERROR_HIGH_ANGLE_RATE_SAFETY")
+    # Instantaneous 5Nm torsion-bar torque also disengages (coop steering)
+    ret.steeringDisengage = eps_disengages or abs(ret.steeringTorque) > STEER_DISENGAGE_THRESHOLD
 
     # Cruise state
     cruise_state = self.can_define.dv["DI_state"]["DI_cruiseState"].get(int(cp_party.vl["DI_state"]["DI_cruiseState"]), None)
@@ -83,6 +88,12 @@ class CarState(CarStateBase):
     ret.cruiseState.standstill = False  # This needs to be false, since we can resume from stop without sending anything special
     ret.standstill = cp_party.vl["ESP_B"]["ESP_vehicleStandstillSts"] == 1
     ret.accFaulted = cruise_state == "FAULT"
+
+    # Stalkless Highland: DAS already sees the steering-wheel scroll cancel.
+    # Raise ButtonType.cancel when OEM DAS_accState is ACC_CANCEL_GENERIC_SILENT (13).
+    acc_state = int(cp_ap_party.vl["DAS_control"]["DAS_accState"])
+    ret.buttonEvents = create_button_events(acc_state, self.prev_acc_state, {13: ButtonType.cancel})
+    self.prev_acc_state = acc_state
 
     # Gear
     ret.gearShifter = GEAR_MAP[self.can_define.dv["DI_systemStatus"]["DI_gear"].get(int(cp_party.vl["DI_systemStatus"]["DI_gear"]), "DI_GEAR_INVALID")]
