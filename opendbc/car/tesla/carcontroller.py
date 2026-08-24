@@ -41,7 +41,7 @@ class CarController(CarControllerBase):
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
 
-      # Cooperative steering: convert light driver torque into extra steering angle
+      # Based on dzid26's implementation of cooperative steering (VTB).
       apply_angle, lat_active = self.coop_steer.update(self.apply_angle_last, lat_active, self.CP, CS, self.VM)
       can_sends.append(self.tesla_can.create_steering_control(apply_angle, lat_active))
 

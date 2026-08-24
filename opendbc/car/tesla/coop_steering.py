@@ -1,7 +1,8 @@
 """
 Cooperative steering for Tesla.
 
-Ported from dzid26/opendbc (vtb) / sunnypilot Tesla coop steering.
+Based on dzid26's implementation of cooperative steering (VTB / vtb-sla).
+AmyJeanes landed Tesla Coop Steering in sunnypilot (opendbc #287).
 Converts light driver torsion-bar torque into extra steering-wheel angle
 while openpilot is engaged, instead of requiring a full override.
 """

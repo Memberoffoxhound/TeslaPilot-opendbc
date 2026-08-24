@@ -89,8 +89,8 @@ class CarState(CarStateBase):
     ret.standstill = cp_party.vl["ESP_B"]["ESP_vehicleStandstillSts"] == 1
     ret.accFaulted = cruise_state == "FAULT"
 
-    # Stalkless Highland: DAS already sees the steering-wheel scroll cancel.
-    # Raise ButtonType.cancel when OEM DAS_accState is ACC_CANCEL_GENERIC_SILENT (13).
+    # Based on dkiiv's implementation of stalkless scroll-wheel cancel (opendbc #3203).
+    # Pulled from dzid26's Tesla fork. DAS_accState 13 = ACC_CANCEL_GENERIC_SILENT.
     acc_state = int(cp_ap_party.vl["DAS_control"]["DAS_accState"])
     ret.buttonEvents = create_button_events(acc_state, self.prev_acc_state, {13: ButtonType.cancel})
     self.prev_acc_state = acc_state
