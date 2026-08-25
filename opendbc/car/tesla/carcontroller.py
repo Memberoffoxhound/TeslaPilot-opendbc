@@ -51,14 +51,15 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        # ACC_ON only while longActive. Else Tesla paints "AEB disabled" all drive.
-        # Panda still forwards stock DAS_control on a real AEB event.
-        if CC.cruiseControl.cancel or not CC.longActive:
-          state = 13  # ACC_CANCEL_GENERIC_SILENT
-          accel = 0.0
-        else:
-          state = 4  # ACC_ON
-          accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+        # Always ACC_ON while alpha long is configured, except explicit cancel.
+        # Sending ACC_CANCEL_GENERIC_SILENT whenever not longActive races Tesla
+        # PCM cruise: the user enables TACC, panda sets controlsAllowed, then
+        # the next DAS_control cancel drops DI_cruiseState and selfdrived
+        # raises controlsMismatch. Stock AEB still forwards via tesla_fwd_hook.
+        # The AEB-disabled banner while disengaged is the cost of blocking
+        # stock DAS_control; do not "fix" it with silent-cancel.
+        state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
+        accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
         cntr = (self.frame // 4) % 8
         can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive))
 
