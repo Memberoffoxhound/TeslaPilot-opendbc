@@ -106,6 +106,12 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
       ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing)
       car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs)
       cached = False
+      # Tesla never returns a VIN on this harness, so the stock cache path
+      # never fires. Empty ISO-TP at ignition used to fall through to MOCK.
+      if (not car_fw) and cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0:
+        carlog.warning("FW query empty, using cached CarParams")
+        car_fw = list(cached_params.carFw)
+        cached = True
 
     exact_fw_match, fw_candidates = match_fw_to_car(car_fw, vin)
   else:
