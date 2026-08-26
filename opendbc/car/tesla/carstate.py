@@ -9,6 +9,22 @@ from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRE
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+# Driver scroll is 1 mph per message (5 on a long swipe). Tesla FSD/cluster will
+# jump DI_digitalSpeed and DAS_accSpeedLimit to a map/FSD target in one frame
+# (observed 70→45→40 mph while DAS_fusedSpeedLimit stayed 60). The cruise
+# planner then sits on A_CRUISE_MIN. Reject steps bigger than a swipe.
+MAX_SET_SPEED_STEP = 6.0 * CV.MPH_TO_MS
+ACC_SPEED_LIMIT_MAX_MPH = 160.0  # SNA is 204.4 (raw 511)
+
+
+def hold_set_speed(prev: float | None, candidate: float) -> float:
+  if prev is None or prev < 1e-3:
+    return candidate
+  if abs(candidate - prev) <= MAX_SET_SPEED_STEP:
+    return candidate
+  return prev
+
+
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
@@ -20,6 +36,7 @@ class CarState(CarStateBase):
     self.cruise_enabled_prev = False
     self.fsd14_error_logged = False
     self.suspected_fsd14 = False
+    self._set_speed_ms: float | None = None
 
     self.hands_on_level = 0
     self.das_control = None
@@ -33,6 +50,19 @@ class CarState(CarStateBase):
       self.autopark = False
     self.autopark_prev = autopark_now
     self.cruise_enabled_prev = cruise_enabled
+
+  def _cluster_set_speed(self, cp_party, cp_ap_party, speed_units: str | None) -> float:
+    if speed_units == "KPH":
+      digital = max(cp_party.vl["DI_state"]["DI_digitalSpeed"] * CV.KPH_TO_MS, 1e-3)
+    else:
+      digital = max(cp_party.vl["DI_state"]["DI_digitalSpeed"] * CV.MPH_TO_MS, 1e-3)
+
+    # DAS_accSpeedLimit is the ACC cap (mph). Prefer it when Tesla is actually
+    # publishing a real number; SNA/NONE fall back to the cluster digit.
+    acc_limit_mph = float(cp_ap_party.vl["DAS_status2"]["DAS_accSpeedLimit"])
+    if 1.0 <= acc_limit_mph <= ACC_SPEED_LIMIT_MAX_MPH:
+      return acc_limit_mph * CV.MPH_TO_MS
+    return digital
 
   def update(self, can_parsers) -> structs.CarState:
     cp_party = can_parsers[Bus.party]
@@ -80,10 +110,13 @@ class CarState(CarStateBase):
 
     # Match panda safety cruise engaged logic
     ret.cruiseState.enabled = cruise_enabled and not self.autopark
-    if speed_units == "KPH":
-      ret.cruiseState.speed = max(cp_party.vl["DI_state"]["DI_digitalSpeed"] * CV.KPH_TO_MS, 1e-3)
-    elif speed_units == "MPH":
-      ret.cruiseState.speed = max(cp_party.vl["DI_state"]["DI_digitalSpeed"] * CV.MPH_TO_MS, 1e-3)
+    candidate = self._cluster_set_speed(cp_party, cp_ap_party, speed_units)
+    if ret.cruiseState.enabled:
+      self._set_speed_ms = hold_set_speed(self._set_speed_ms, candidate)
+      ret.cruiseState.speed = max(self._set_speed_ms, 1e-3)
+    else:
+      self._set_speed_ms = None
+      ret.cruiseState.speed = max(candidate, 1e-3)
     ret.cruiseState.available = cruise_state == "STANDBY" or ret.cruiseState.enabled
     ret.cruiseState.standstill = False  # This needs to be false, since we can resume from stop without sending anything special
     ret.standstill = cp_party.vl["ESP_B"]["ESP_vehicleStandstillSts"] == 1

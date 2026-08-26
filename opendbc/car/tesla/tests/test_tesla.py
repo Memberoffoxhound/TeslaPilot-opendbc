@@ -102,3 +102,32 @@ class TestTeslaFingerprint(unittest.TestCase):
         fingerprint[1][RADAR_START_ADDR] = 8
       CP = CarInterface.get_params(CAR.TESLA_MODEL_X, fingerprint, [], False, False, False)
       assert CP.radarUnavailable  # Always unavailable since no radar DBC
+
+
+class TestSetSpeedHold(unittest.TestCase):
+  def test_holds_fsd_jump(self):
+    from opendbc.car.common.conversions import Conversions as CV
+    from opendbc.car.tesla.carstate import hold_set_speed
+
+    v70 = 70 * CV.MPH_TO_MS
+    v45 = 45 * CV.MPH_TO_MS
+    v40 = 40 * CV.MPH_TO_MS
+    v71 = 71 * CV.MPH_TO_MS
+    v75 = 75 * CV.MPH_TO_MS
+
+    held = hold_set_speed(None, v70)
+    self.assertAlmostEqual(held, v70, places=4)
+    # FSD slam — keep 70
+    held = hold_set_speed(held, v45)
+    self.assertAlmostEqual(held, v70, places=4)
+    held = hold_set_speed(held, v40)
+    self.assertAlmostEqual(held, v70, places=4)
+    # Tesla snaps back to 70
+    held = hold_set_speed(held, v70)
+    self.assertAlmostEqual(held, v70, places=4)
+    # 1 mph scroll
+    held = hold_set_speed(held, v71)
+    self.assertAlmostEqual(held, v71, places=4)
+    # 5 mph long swipe
+    held = hold_set_speed(held, v75)
+    self.assertAlmostEqual(held, v75, places=4)
