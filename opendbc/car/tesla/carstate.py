@@ -11,16 +11,25 @@ ButtonType = structs.CarState.ButtonEvent.Type
 
 # Driver scroll is 1 mph per message (5 on a long swipe). Tesla FSD/cluster will
 # jump DI_digitalSpeed and DAS_accSpeedLimit to a map/FSD target in one frame
-# (observed 70→45→40 mph while DAS_fusedSpeedLimit stayed 60). The cruise
-# planner then sits on A_CRUISE_MIN. Reject steps bigger than a swipe.
+# (70→45→40 at cruise → A_CRUISE_MIN). Off-ramps do the same slam AFTER speed
+# has already dropped (70→33 at 32 mph). Only hold unexplained slams while
+# still at the old cruise speed; follow Tesla once we've left it, on pedals,
+# or with a blinker.
 MAX_SET_SPEED_STEP = 6.0 * CV.MPH_TO_MS
+LEFT_CRUISE_MPH = 10.0 * CV.MPH_TO_MS
 ACC_SPEED_LIMIT_MAX_MPH = 160.0  # SNA is 204.4 (raw 511)
 
 
-def hold_set_speed(prev: float | None, candidate: float) -> float:
+def hold_set_speed(prev: float | None, candidate: float, v_ego: float,
+                   gas_pressed: bool = False, brake_pressed: bool = False,
+                   blinker: bool = False) -> float:
   if prev is None or prev < 1e-3:
     return candidate
   if abs(candidate - prev) <= MAX_SET_SPEED_STEP:
+    return candidate
+  if gas_pressed or brake_pressed or blinker:
+    return candidate
+  if v_ego < prev - LEFT_CRUISE_MPH:
     return candidate
   return prev
 
@@ -111,12 +120,6 @@ class CarState(CarStateBase):
     # Match panda safety cruise engaged logic
     ret.cruiseState.enabled = cruise_enabled and not self.autopark
     candidate = self._cluster_set_speed(cp_party, cp_ap_party, speed_units)
-    if ret.cruiseState.enabled:
-      self._set_speed_ms = hold_set_speed(self._set_speed_ms, candidate)
-      ret.cruiseState.speed = max(self._set_speed_ms, 1e-3)
-    else:
-      self._set_speed_ms = None
-      ret.cruiseState.speed = max(candidate, 1e-3)
     ret.cruiseState.available = cruise_state == "STANDBY" or ret.cruiseState.enabled
     ret.cruiseState.standstill = False  # This needs to be false, since we can resume from stop without sending anything special
     ret.standstill = cp_party.vl["ESP_B"]["ESP_vehicleStandstillSts"] == 1
@@ -137,6 +140,17 @@ class CarState(CarStateBase):
     # Blinkers
     ret.leftBlinker = cp_party.vl["UI_warning"]["leftBlinkerBlinking"] in (1, 2)
     ret.rightBlinker = cp_party.vl["UI_warning"]["rightBlinkerBlinking"] in (1, 2)
+
+    if ret.cruiseState.enabled:
+      self._set_speed_ms = hold_set_speed(
+        self._set_speed_ms, candidate, ret.vEgo,
+        gas_pressed=ret.gasPressed, brake_pressed=ret.brakePressed,
+        blinker=ret.leftBlinker or ret.rightBlinker,
+      )
+      ret.cruiseState.speed = max(self._set_speed_ms, 1e-3)
+    else:
+      self._set_speed_ms = None
+      ret.cruiseState.speed = max(candidate, 1e-3)
 
     # Seatbelt
     ret.seatbeltUnlatched = cp_party.vl["UI_warning"]["buckleStatus"] != 1

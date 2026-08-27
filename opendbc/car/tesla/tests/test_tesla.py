@@ -105,29 +105,58 @@ class TestTeslaFingerprint(unittest.TestCase):
 
 
 class TestSetSpeedHold(unittest.TestCase):
-  def test_holds_fsd_jump(self):
+  def test_holds_fsd_jump_at_cruise(self):
     from opendbc.car.common.conversions import Conversions as CV
     from opendbc.car.tesla.carstate import hold_set_speed
 
     v70 = 70 * CV.MPH_TO_MS
     v45 = 45 * CV.MPH_TO_MS
     v40 = 40 * CV.MPH_TO_MS
+    v35 = 35 * CV.MPH_TO_MS
     v71 = 71 * CV.MPH_TO_MS
     v75 = 75 * CV.MPH_TO_MS
 
-    held = hold_set_speed(None, v70)
+    held = hold_set_speed(None, v70, v70)
     self.assertAlmostEqual(held, v70, places=4)
-    # FSD slam — keep 70
-    held = hold_set_speed(held, v45)
+    # interstate FSD slam while still at 70
+    held = hold_set_speed(held, v45, 69 * CV.MPH_TO_MS)
     self.assertAlmostEqual(held, v70, places=4)
-    held = hold_set_speed(held, v40)
+    held = hold_set_speed(held, v40, 68 * CV.MPH_TO_MS)
     self.assertAlmostEqual(held, v70, places=4)
-    # Tesla snaps back to 70
-    held = hold_set_speed(held, v70)
+    held = hold_set_speed(held, v35, 64 * CV.MPH_TO_MS)
     self.assertAlmostEqual(held, v70, places=4)
-    # 1 mph scroll
-    held = hold_set_speed(held, v71)
+    # Tesla snaps back
+    held = hold_set_speed(held, v70, 62 * CV.MPH_TO_MS)
+    self.assertAlmostEqual(held, v70, places=4)
+    held = hold_set_speed(held, v71, v70)
     self.assertAlmostEqual(held, v71, places=4)
-    # 5 mph long swipe
-    held = hold_set_speed(held, v75)
+    held = hold_set_speed(held, v75, v71)
     self.assertAlmostEqual(held, v75, places=4)
+
+  def test_allows_offramp_after_already_slow(self):
+    from opendbc.car.common.conversions import Conversions as CV
+    from opendbc.car.tesla.carstate import hold_set_speed
+
+    v70 = 70 * CV.MPH_TO_MS
+    v55 = 55 * CV.MPH_TO_MS
+    v33 = 33 * CV.MPH_TO_MS
+    v_ego = 32.4 * CV.MPH_TO_MS
+
+    held = hold_set_speed(v70, v55, v_ego, gas_pressed=True)
+    self.assertAlmostEqual(held, v55, places=4)
+    held = hold_set_speed(held, v33, v_ego, gas_pressed=True)
+    self.assertAlmostEqual(held, v33, places=4)
+
+    # already 38 mph below set, even without pedal
+    held = hold_set_speed(v70, v33, v_ego)
+    self.assertAlmostEqual(held, v33, places=4)
+
+  def test_allows_blinker_or_brake(self):
+    from opendbc.car.common.conversions import Conversions as CV
+    from opendbc.car.tesla.carstate import hold_set_speed
+
+    v70 = 70 * CV.MPH_TO_MS
+    v45 = 45 * CV.MPH_TO_MS
+    v_ego = 69 * CV.MPH_TO_MS
+    self.assertAlmostEqual(hold_set_speed(v70, v45, v_ego, blinker=True), v45, places=4)
+    self.assertAlmostEqual(hold_set_speed(v70, v45, v_ego, brake_pressed=True), v45, places=4)
