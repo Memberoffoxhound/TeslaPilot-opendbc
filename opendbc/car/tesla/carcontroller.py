@@ -69,8 +69,13 @@ class CarController(CarControllerBase):
         # Lead / FCW accels stay on the stock ±4.9 limit so following still bites.
         jerk_min = SOFT_DAS_JERK_MIN if accel >= SOFT_DAS_JERK_ACCEL else CarControllerParams.JERK_LIMIT_MIN
         cntr = (self.frame // 4) % 8
+        hud_kph = None
+        if not self.CP.pcmCruise:
+          hud_kph = float(getattr(CS.out, "vCruise", 0.0) or 0.0)
+          if hud_kph <= 0 or hud_kph >= 250:
+            hud_kph = None
         can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive,
-                                                                    jerk_min=jerk_min))
+                                                                    jerk_min=jerk_min, set_speed_kph=hud_kph))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
