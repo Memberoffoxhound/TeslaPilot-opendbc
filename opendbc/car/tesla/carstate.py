@@ -20,6 +20,7 @@ class CarState(CarStateBase):
     self.prev_acc_state = 0
     self.prev_dsu = None
     self.cruise_btn = 0
+    self.scroll_queue = 0  # signed display-unit steps left to emit
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -122,20 +123,33 @@ class CarState(CarStateBase):
     self.prev_acc_state = acc_state
 
     dsu = float(cp_party.vl["DI_state"]["DI_digitalSpeed"])
-    tick = 0
     if (not self.CP.pcmCruise) and self.prev_dsu is not None:
       delta = dsu - self.prev_dsu
-      # display units: 1.0 mph or 0.5–1.0 kph. Ignore multi-mph Tesla dumps.
-      if 0.4 <= delta <= 2.6:
-        tick = 1
-      elif -2.6 <= delta <= -0.4:
-        tick = 2
+      # DI_digitalSpeed is already in the cluster unit (mph or kph).
+      # Slow scroll: 1 unit. Fast scroll: 5 units. Anything else is a Tesla dump — ignore.
+      step = 0
+      ad = abs(delta)
+      if 0.4 <= ad <= 1.8:
+        step = 1
+      elif 4.2 <= ad <= 6.2:
+        step = 5
+      if step:
+        self.scroll_queue += step if delta > 0 else -step
+    self.prev_dsu = dsu
+
+    # One press/release per unit so VCruiseHelper's 1-unit path stays stock.
+    tick = 0
+    if self.scroll_queue != 0:
+      if self.cruise_btn == 0:
+        tick = 1 if self.scroll_queue > 0 else 2
+      else:
+        tick = 0
+        self.scroll_queue += -1 if self.scroll_queue > 0 else 1
     events += create_button_events(tick, self.cruise_btn, {
       1: ButtonType.accelCruise,
       2: ButtonType.decelCruise,
     })
     self.cruise_btn = tick
-    self.prev_dsu = dsu
     ret.buttonEvents = events
 
     # Messages needed by carcontroller
