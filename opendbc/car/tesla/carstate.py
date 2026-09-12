@@ -1,6 +1,6 @@
 import copy
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, create_button_events, structs
+from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
@@ -17,10 +17,6 @@ class CarState(CarStateBase):
 
     self.hands_on_level = 0
     self.das_control = None
-    self.prev_acc_state = 0
-    self.prev_dsu = None
-    self.cruise_btn = 0
-    self.scroll_queue = 0  # signed display-unit steps left to emit
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -116,41 +112,7 @@ class CarState(CarStateBase):
       ret.invalidLkasSetting = cp_ap_party.vl["DAS_settings"]["DAS_autosteerEnabled"] != 0
 
 
-    # Stalkless cancel + 1-tick scroll when OP owns set speed (pcmCruise=False).
-    ButtonType = structs.CarState.ButtonEvent.Type
-    acc_state = int(cp_ap_party.vl["DAS_control"]["DAS_accState"])
-    events = create_button_events(acc_state, self.prev_acc_state, {13: ButtonType.cancel})
-    self.prev_acc_state = acc_state
-
-    dsu = float(cp_party.vl["DI_state"]["DI_digitalSpeed"])
-    if (not self.CP.pcmCruise) and self.prev_dsu is not None:
-      delta = dsu - self.prev_dsu
-      # DI_digitalSpeed is already in the cluster unit (mph or kph).
-      # Slow scroll: 1 unit. Fast scroll: 5 units. Anything else is a Tesla dump — ignore.
-      step = 0
-      ad = abs(delta)
-      if 0.4 <= ad <= 1.8:
-        step = 1
-      elif 4.2 <= ad <= 6.2:
-        step = 5
-      if step:
-        self.scroll_queue += step if delta > 0 else -step
-    self.prev_dsu = dsu
-
-    # One press/release per unit so VCruiseHelper's 1-unit path stays stock.
-    tick = 0
-    if self.scroll_queue != 0:
-      if self.cruise_btn == 0:
-        tick = 1 if self.scroll_queue > 0 else 2
-      else:
-        tick = 0
-        self.scroll_queue += -1 if self.scroll_queue > 0 else 1
-    events += create_button_events(tick, self.cruise_btn, {
-      1: ButtonType.accelCruise,
-      2: ButtonType.decelCruise,
-    })
-    self.cruise_btn = tick
-    ret.buttonEvents = events
+    # Buttons # ToDo: add Gap adjust button
 
     # Messages needed by carcontroller
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])

@@ -20,13 +20,8 @@ class TeslaCAN:
 
     return self.packer.make_can_msg("DAS_steeringControl", CANBUS.party, values)
 
-  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, jerk_min=None, set_speed_kph=None):
-    # Default setSpeed is the actuation encoding. When OP owns cruise, pass the
-    # HUD target in kph so DI/cluster can track openpilot instead of Tesla AP.
-    if set_speed_kph is not None:
-      set_speed = min(max(float(set_speed_kph), 0.0), 400.0)
-    else:
-      set_speed = min(max(v_ego + accel, 0) * CV.MS_TO_KPH, 400)
+  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, jerk_min=None):
+    set_speed = min(max(v_ego + accel, 0) * CV.MS_TO_KPH, 400)
 
     values = {
       "DAS_setSpeed": set_speed,
