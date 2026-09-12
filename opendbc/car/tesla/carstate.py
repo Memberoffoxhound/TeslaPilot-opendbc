@@ -1,6 +1,6 @@
 import copy
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
@@ -17,6 +17,9 @@ class CarState(CarStateBase):
 
     self.hands_on_level = 0
     self.das_control = None
+    self.prev_acc_state = 0
+    self.prev_dsu = None
+    self.cruise_btn = 0
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -111,7 +114,29 @@ class CarState(CarStateBase):
     if not (self.CP.flags & TeslaFlags.MISSING_DAS_SETTINGS):
       ret.invalidLkasSetting = cp_ap_party.vl["DAS_settings"]["DAS_autosteerEnabled"] != 0
 
-    # Buttons # ToDo: add Gap adjust button
+
+    # Stalkless cancel + 1-tick scroll when OP owns set speed (pcmCruise=False).
+    ButtonType = structs.CarState.ButtonEvent.Type
+    acc_state = int(cp_ap_party.vl["DAS_control"]["DAS_accState"])
+    events = create_button_events(acc_state, self.prev_acc_state, {13: ButtonType.cancel})
+    self.prev_acc_state = acc_state
+
+    dsu = float(cp_party.vl["DI_state"]["DI_digitalSpeed"])
+    tick = 0
+    if (not self.CP.pcmCruise) and self.prev_dsu is not None:
+      delta = dsu - self.prev_dsu
+      # display units: 1.0 mph or 0.5–1.0 kph. Ignore multi-mph Tesla dumps.
+      if 0.4 <= delta <= 2.6:
+        tick = 1
+      elif -2.6 <= delta <= -0.4:
+        tick = 2
+    events += create_button_events(tick, self.cruise_btn, {
+      1: ButtonType.accelCruise,
+      2: ButtonType.decelCruise,
+    })
+    self.cruise_btn = tick
+    self.prev_dsu = dsu
+    ret.buttonEvents = events
 
     # Messages needed by carcontroller
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])
