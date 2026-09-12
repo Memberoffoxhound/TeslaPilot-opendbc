@@ -8,10 +8,22 @@ from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
 from opendbc.car.mock.values import CAR as MOCK
+from opendbc.car.tesla.values import CAR as TESLA
 from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
 FRAME_FINGERPRINT = 100  # 1s
+
+# S3XYPilot Highland is a 2026 Model 3 Highland only. Stock openpilot lists
+# that car as TESLA_MODEL_3 (HW4 2024-25). Tesla EPS ISO-TP is flaky at
+# ignition on this harness; never fall through to MOCK.
+HIGHLAND_CAR = TESLA.TESLA_MODEL_3
+HIGHLAND_EPS_FW = b'TeMYG4_Main_0.0.0 (78),E4H015.05.0'
+
+
+def _highland_eps_fw() -> CarParams.CarFw:
+  return CarParams.CarFw(ecu=CarParams.Ecu.eps, fwVersion=HIGHLAND_EPS_FW,
+                         address=0x730, brand="tesla", bus=0)
 
 
 def load_interfaces(brand_names):
@@ -113,11 +125,17 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
         car_fw = list(cached_params.carFw)
         cached = True
 
+    if not car_fw and not fixed_fingerprint:
+      carlog.warning("Highland: no EPS FW, using this car's %s", HIGHLAND_EPS_FW)
+      car_fw = [_highland_eps_fw()]
+
     exact_fw_match, fw_candidates = match_fw_to_car(car_fw, vin)
   else:
     vin_rx_addr, vin_rx_bus, vin = -1, -1, VIN_UNKNOWN
     exact_fw_match, fw_candidates, car_fw = True, set(), []
     cached = False
+    if not os.environ.get('FINGERPRINT'):
+      car_fw = [_highland_eps_fw()]
 
   if not is_valid_vin(vin):
     carlog.error({"event": "Malformed VIN", "vin": vin})
@@ -146,6 +164,11 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
   if fixed_fingerprint:
     car_fingerprint = fixed_fingerprint
     source = CarParams.FingerprintSource.fixed
+  else:
+    # This fork is the 2026 Model 3 Highland only. Pin the stock 2024-25 HW4 platform.
+    car_fingerprint = HIGHLAND_CAR
+    source = CarParams.FingerprintSource.fixed
+    exact_match = True
 
   carlog.error({"event": "fingerprinted", "car_fingerprint": str(car_fingerprint), "source": source, "fuzzy": not exact_match,
                 "cached": cached, "fw_count": len(car_fw), "ecu_responses": list(ecu_rx_addrs), "vin_rx_addr": vin_rx_addr,
@@ -160,7 +183,7 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
 
   if candidate is None:
     carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
-    candidate = "MOCK"
+    candidate = HIGHLAND_CAR
 
   CarInterface = interfaces[candidate]
   CP: CarParams = CarInterface.get_params(candidate, fingerprints, car_fw, alpha_long_allowed, is_release, docs=False)
