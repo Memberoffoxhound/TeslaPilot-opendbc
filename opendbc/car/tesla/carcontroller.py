@@ -8,12 +8,6 @@ from opendbc.car.tesla.values import CarControllerParams
 from opendbc.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.car.vehicle_model import VehicleModel
 
-# Accels at or above this are cruise-return / comfort, not lead or FCW.
-# Soft Landing planner caps return at about -0.40; stock cruise-return is -1.2.
-SOFT_DAS_JERK_ACCEL = -0.85
-SOFT_DAS_JERK_MIN = -0.28
-
-
 def get_safety_CP():
   # We use the TESLA_MODEL_Y platform for lateral limiting to match safety
   # A Model 3 at 40 m/s using the Model Y limits sees a <0.3% difference in max angle (from curvature factor)
@@ -65,12 +59,8 @@ class CarController(CarControllerBase):
         # stock DAS_control; do not "fix" it with silent-cancel.
         state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
         accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
-        # Shallow DI jerk only when the command itself is a cruise-return.
-        # Lead / FCW accels stay on the stock ±4.9 limit so following still bites.
-        jerk_min = SOFT_DAS_JERK_MIN if accel >= SOFT_DAS_JERK_ACCEL else CarControllerParams.JERK_LIMIT_MIN
         cntr = (self.frame // 4) % 8
-        can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive,
-                                                                    jerk_min=jerk_min))
+        can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
