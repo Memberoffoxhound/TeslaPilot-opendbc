@@ -4,7 +4,6 @@ import unittest
 import numpy as np
 
 from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm
-from opendbc.car.tesla.teslacan import get_steer_ctrl_type
 from opendbc.car.tesla.values import CarControllerParams, TeslaSafetyFlags, TeslaFlags
 from opendbc.car.tesla.carcontroller import get_safety_CP
 from opendbc.car.structs import CarParams
@@ -78,8 +77,6 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
 
   def _angle_cmd_msg(self, angle: float, state: bool | int, increment_timer: bool = True, bus: int = 0):
     # If FSD 14, translate steer control type to new flipped definition
-    if self.safety.get_current_safety_param() & TeslaSafetyFlags.FSD_14:
-      state = get_steer_ctrl_type(TeslaFlags.FSD_14, int(state))
 
     values = {"DAS_steeringAngleRequest": angle, "DAS_steeringControlType": state}
     if increment_timer:
@@ -401,7 +398,7 @@ class TestTeslaStockSafety(TestTeslaSafetyBase):
 
 
 class TestTeslaFSD14StockSafety(TestTeslaStockSafety):
-  SAFETY_PARAM = TeslaSafetyFlags.FSD_14
+  SAFETY_PARAM = TeslaSafetyFlags.LEGACY_DAS_STEERING
 
 
 class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
@@ -453,7 +450,7 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
 
 
 class TestTeslaFSD14LongitudinalSafety(TestTeslaLongitudinalSafety):
-  SAFETY_PARAM = TeslaSafetyFlags.LONG_CONTROL | TeslaSafetyFlags.FSD_14
+  SAFETY_PARAM = TeslaSafetyFlags.LONG_CONTROL | TeslaSafetyFlags.LEGACY_DAS_STEERING
 
 
 class TestTeslaIgnition(unittest.TestCase):
