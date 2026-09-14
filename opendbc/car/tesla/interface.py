@@ -39,10 +39,6 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.LONG_CONTROL.value
 
-      ret.vEgoStopping = 0.1
-      ret.vEgoStarting = 0.1
-      ret.stoppingDecelRate = 0.3
-
     legacy_das = any(fw.ecu == Ecu.eps and fw.fwVersion in LEGACY_DAS_STEERING_FW.get(candidate, []) for fw in car_fw)
     if legacy_das:
       ret.flags |= TeslaFlags.LEGACY_DAS_STEERING.value
