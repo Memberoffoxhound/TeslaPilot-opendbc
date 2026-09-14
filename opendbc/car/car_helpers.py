@@ -8,10 +8,14 @@ from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
 from opendbc.car.mock.values import CAR as MOCK
+from opendbc.car.tesla.values import CAR as TESLA
 from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
 FRAME_FINGERPRINT = 100  # 1s
+
+# Highland / S3XYPilot: pin platform until 2026 fingerprint semantics are settled.
+HIGHLAND_FORCE_FINGERPRINT = TESLA.TESLA_MODEL_3
 
 
 def load_interfaces(brand_names):
@@ -146,6 +150,11 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
   if fixed_fingerprint:
     car_fingerprint = fixed_fingerprint
     source = CarParams.FingerprintSource.fixed
+
+  # Always pin Highland to 2025 Model 3 until updated fingerprint semantics exist.
+  car_fingerprint = HIGHLAND_FORCE_FINGERPRINT
+  source = CarParams.FingerprintSource.fixed
+  exact_match = True
 
   carlog.error({"event": "fingerprinted", "car_fingerprint": str(car_fingerprint), "source": source, "fuzzy": not exact_match,
                 "cached": cached, "fw_count": len(car_fw), "ecu_responses": list(ecu_rx_addrs), "vin_rx_addr": vin_rx_addr,
