@@ -317,7 +317,8 @@ void gen_crc_lookup_table_16(uint16_t poly, uint16_t crc_lut[]) {
 }
 
 // 1Hz safety function called by main. Now just a check for lagging safety messages
-void safety_tick(void) {
+void safety_tick(const safety_config *cfg) {
+  (void)cfg;
   const uint8_t MAX_MISSED_MSGS = 10U;
   bool rx_checks_invalid = false;
   uint32_t ts = microsecond_timer_get();
