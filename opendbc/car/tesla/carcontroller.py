@@ -5,7 +5,13 @@ from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CarControllerParams
+from opendbc.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.car.vehicle_model import VehicleModel
+
+# Accels at or above this are cruise-return / comfort, not lead or FCW.
+# Soft Landing planner caps return at about -0.40; stock cruise-return is -1.2.
+SOFT_DAS_JERK_ACCEL = -0.85
+SOFT_DAS_JERK_MIN = -0.28
 
 
 def get_safety_CP():
@@ -21,6 +27,7 @@ class CarController(CarControllerBase):
     self.apply_angle_last = 0
     self.packer = CANPacker(dbc_names[Bus.party])
     self.tesla_can = TeslaCAN(CP, self.packer)
+    self.coop_steer = CoopSteeringCarController()
 
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
@@ -32,14 +39,16 @@ class CarController(CarControllerBase):
     # Tesla EPS enforces disabling steering on heavy lateral override force.
     # When enabling in a tight curve, we wait until user reduces steering force to start steering.
     # Canceling is done on rising edge and is handled generically with CC.cruiseControl.cancel
-    lat_active = CC.latActive and CS.hands_on_level < 3
+    lat_active = CC.latActive and not CS.out.steeringDisengage
 
     if self.frame % 2 == 0:
       # Angular rate limit based on speed
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
 
-      can_sends.append(self.tesla_can.create_steering_control(self.apply_angle_last, lat_active))
+      # Based on dzid26's implementation of cooperative steering (VTB).
+      apply_angle, lat_active = self.coop_steer.update(self.apply_angle_last, lat_active, self.CP, CS, self.VM)
+      can_sends.append(self.tesla_can.create_steering_control(apply_angle, lat_active))
 
     if self.frame % 10 == 0:
       can_sends.append(self.tesla_can.create_steering_allowed())
@@ -47,10 +56,21 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
+        # Always ACC_ON while alpha long is configured, except explicit cancel.
+        # Sending ACC_CANCEL_GENERIC_SILENT whenever not longActive races Tesla
+        # PCM cruise: the user enables TACC, panda sets controlsAllowed, then
+        # the next DAS_control cancel drops DI_cruiseState and selfdrived
+        # raises controlsMismatch. Stock AEB still forwards via tesla_fwd_hook.
+        # The AEB-disabled banner while disengaged is the cost of blocking
+        # stock DAS_control; do not "fix" it with silent-cancel.
         state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
         accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+        # Shallow DI jerk only when the command itself is a cruise-return.
+        # Lead / FCW accels stay on the stock ±4.9 limit so following still bites.
+        jerk_min = SOFT_DAS_JERK_MIN if accel >= SOFT_DAS_JERK_ACCEL else CarControllerParams.JERK_LIMIT_MIN
         cntr = (self.frame // 4) % 8
-        can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive))
+        can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive,
+                                                                    jerk_min=jerk_min))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal

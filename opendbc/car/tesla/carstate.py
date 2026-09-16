@@ -1,11 +1,11 @@
 import copy
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, structs
-from opendbc.car.carlog import carlog
+from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.tesla.teslacan import get_steer_ctrl_type
-from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
+from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags
+
+ButtonType = structs.CarState.ButtonEvent.Type
 
 class CarState(CarStateBase):
   def __init__(self, CP):
@@ -16,11 +16,9 @@ class CarState(CarStateBase):
     self.autopark = False
     self.autopark_prev = False
     self.cruise_enabled_prev = False
-    self.fsd14_error_logged = False
-    self.suspected_fsd14 = False
-
     self.hands_on_level = 0
     self.das_control = None
+    self.prev_acc_state = 0
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -62,8 +60,10 @@ class CarState(CarStateBase):
 
     # FSD disengages using union of handsOnLevel (slow overrides) and high angle rate faults (fast overrides, high speed)
     eac_error_code = self.can_define.dv["EPAS3S_sysStatus"]["EPAS3S_eacErrorCode"].get(int(epas_status["EPAS3S_eacErrorCode"]), None)
-    ret.steeringDisengage = self.hands_on_level >= 3 or (eac_status == "EAC_INHIBITED" and
+    eps_disengages = self.hands_on_level >= 3 or (eac_status == "EAC_INHIBITED" and
                                                          eac_error_code == "EAC_ERROR_HIGH_ANGLE_RATE_SAFETY")
+    # Instantaneous 5Nm torsion-bar torque also disengages (coop steering)
+    ret.steeringDisengage = eps_disengages or abs(ret.steeringTorque) > STEER_DISENGAGE_THRESHOLD
 
     # Cruise state
     cruise_state = self.can_define.dv["DI_state"]["DI_cruiseState"].get(int(cp_party.vl["DI_state"]["DI_cruiseState"]), None)
@@ -83,6 +83,12 @@ class CarState(CarStateBase):
     ret.cruiseState.standstill = False  # This needs to be false, since we can resume from stop without sending anything special
     ret.standstill = cp_party.vl["ESP_B"]["ESP_vehicleStandstillSts"] == 1
     ret.accFaulted = cruise_state == "FAULT"
+
+    # Based on dkiiv's implementation of stalkless scroll-wheel cancel (opendbc #3203).
+    # Pulled from dzid26's Tesla fork. DAS_accState 13 = ACC_CANCEL_GENERIC_SILENT.
+    acc_state = int(cp_ap_party.vl["DAS_control"]["DAS_accState"])
+    ret.buttonEvents = create_button_events(acc_state, self.prev_acc_state, {13: ButtonType.cancel})
+    self.prev_acc_state = acc_state
 
     # Gear
     ret.gearShifter = GEAR_MAP[self.can_define.dv["DI_systemStatus"]["DI_gear"].get(int(cp_party.vl["DI_systemStatus"]["DI_gear"]), "DI_GEAR_INVALID")]
@@ -104,30 +110,17 @@ class CarState(CarStateBase):
     # AEB
     ret.stockAeb = cp_ap_party.vl["DAS_control"]["DAS_aebEvent"] == 1
 
-    # LKAS
-    # On FSD 14+, ANGLE_CONTROL behavior changed to allow user winddown while actuating.
-    # FSD switched from using ANGLE_CONTROL to LANE_KEEP_ASSIST to likely keep the old steering override disengage logic.
-    # LKAS switched from LANE_KEEP_ASSIST to ANGLE_CONTROL to likely allow overriding LKAS events smoothly
-    lkas_ctrl_type = get_steer_ctrl_type(self.CP.flags, 2)
-    ret.stockLkas = cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"] == lkas_ctrl_type  # LANE_KEEP_ASSIST
+    # LKAS — 3-bit DAS_steeringControlType (AmyJeanes / opendbc#3389).
+    # Legacy 2-bit EPS FW is flagged LEGACY_DAS_STEERING and shifted into the 3-bit field.
+    steer_control_type = int(cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"])
+    if self.CP.flags & TeslaFlags.LEGACY_DAS_STEERING:
+      steer_control_type >>= 1
+    ret.stockLkas = steer_control_type == 2  # LANE_KEEP_ASSIST
 
     # Stock Autosteer should be off (includes FSD)
     # TODO: find for TESLA_MODEL_X and HW2.5 vehicles
     if not (self.CP.flags & TeslaFlags.MISSING_DAS_SETTINGS):
       ret.invalidLkasSetting = cp_ap_party.vl["DAS_settings"]["DAS_autosteerEnabled"] != 0
-
-      # Because we don't have FSD 14 detection outside of a set of FW, we should check if this FW is accidentally missing from FSD_14_FW
-      # 1. If in Autosteer or FSD, already caught by invalidLkasSetting
-      # 2. If in TACC and DAS ever sends ANGLE_CONTROL (1), we can infer it's trying to do LKAS on FSD 14+
-      angle_control = cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"] == 1  # ANGLE_CONTROL
-      if not ret.invalidLkasSetting and angle_control and not self.CP.flags & TeslaFlags.FSD_14:
-        self.suspected_fsd14 = True
-
-      if self.suspected_fsd14:
-        ret.invalidLkasSetting = True
-        if not self.fsd14_error_logged:
-          carlog.error("FSD 14 detected, but FW not in FSD_14_FW set")
-          self.fsd14_error_logged = True
 
     # Buttons # ToDo: add Gap adjust button
 
