@@ -93,6 +93,11 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
   ecu_rx_addrs = set()
 
   start_time = time.monotonic()
+  # Tesla harness does not answer OBD VIN. Comma master now refuses FW
+  # cache unless carVin is valid, so every ignition burns ISO-TP and can
+  # leave card without CarParams. Highland already pins TESLA_MODEL_3.
+  if fixed_fingerprint:
+    skip_fw_query = True
   if not skip_fw_query:
     if cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0 and \
        (cached_params.carVin != VIN_UNKNOWN or os.environ.get("REPLAY")) and not disable_fw_cache:

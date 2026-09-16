@@ -23,8 +23,12 @@ class CarInterface(CarInterfaceBase):
 
     ret.steerControlType = structs.CarParams.SteerControlType.angle
 
-    # Model X and HW 2.5 vehicles are missing DAS_settings
-    if 0x293 not in fingerprint[CANBUS.autopilot_party]:
+    # Model X and HW 2.5 vehicles are missing DAS_settings.
+    # Comma indexes fingerprint[2] directly. After the master panda pin,
+    # Tesla party/AP buses may be empty during fingerprint (CAN-FD not up
+    # yet) and that KeyError killed card — waiting to start forever.
+    party_fp = fingerprint.get(CANBUS.autopilot_party, {}) if isinstance(fingerprint, dict) else {}
+    if 0x293 not in party_fp:
       ret.flags |= TeslaFlags.MISSING_DAS_SETTINGS.value
 
     # Radar support is intended to work for:
@@ -32,7 +36,8 @@ class CarInterface(CarInterfaceBase):
     # - Tesla Model Y vehicles built approximately mid-2020 through early-2021
     # - Vehicles equipped with the Continental ARS4-B radar (used on HW2 / HW2.5 / early HW3)
     # - Radar CAN lines must be tapped and connected to CAN bus 1 (normally not used for tesla vehicles)
-    ret.radarUnavailable = RADAR_START_ADDR not in fingerprint[1] or Bus.radar not in DBC[candidate]
+    bus1_fp = fingerprint.get(1, {}) if isinstance(fingerprint, dict) else {}
+    ret.radarUnavailable = RADAR_START_ADDR not in bus1_fp or Bus.radar not in DBC[candidate]
 
     ret.alphaLongitudinalAvailable = True
     if alpha_long:
