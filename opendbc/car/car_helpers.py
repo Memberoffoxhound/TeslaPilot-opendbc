@@ -14,7 +14,7 @@ from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
 FRAME_FINGERPRINT = 100  # 1s
 
-# Highland / S3XYPilot: pin platform until 2026 fingerprint semantics are settled.
+# Highland / TeslaPilot: pin platform until 2026 fingerprint semantics are settled.
 HIGHLAND_FORCE_FINGERPRINT = TESLA.TESLA_MODEL_3
 
 
