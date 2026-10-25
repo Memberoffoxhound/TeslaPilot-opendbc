@@ -2,7 +2,7 @@ from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.tesla.carcontroller import CarController
 from opendbc.car.tesla.carstate import CarState
-from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC, LEGACY_DAS_STEERING_FW, Ecu
+from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC
 from opendbc.car.tesla.radar_interface import RadarInterface, RADAR_START_ADDR
 
 
@@ -46,12 +46,17 @@ class CarInterface(CarInterfaceBase):
       # vEgoStopping/vEgoStarting/stoppingDecelRate are in car.capnp deprecated group;
       # setting them raises AttributeError and kills card (openpilot Unavailable).
 
-    legacy_das = any(fw.ecu == Ecu.eps and fw.fwVersion in LEGACY_DAS_STEERING_FW.get(candidate, []) for fw in car_fw)
-    if legacy_das:
-      ret.flags |= TeslaFlags.LEGACY_DAS_STEERING.value
-      ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.LEGACY_DAS_STEERING.value
+    # Tesla expanded DAS_steeringControl->DAS_steeringControlType to 3 bits: first in the FSD 14 builds for HW4 around 10-26-2025,
+    # then in the other HW4 builds around 03-02-2026, and for HW3 and HW2.5 with 2026.8.6 around 04-03-2026.
+    # The values were pushed to the right by 1 bit and kept the same definitions, plus 4 = FSD was added.
+    # These messages are only sent by the 3-bit firmware:
+    # - HW3/HW4: DAS_redundantBrakingControl (0x489)
+    # - HW2.5/HW3/HW4: DI_autonomyHealth (0x054)
+    # TeslaPilot: .get() so an empty bus during the 2 s fingerprint cannot KeyError card (b31a863)
+    das_steering_3_bit = 0x489 in fingerprint.get(CANBUS.autopilot_party, {}) or 0x054 in fingerprint.get(CANBUS.party, {})
 
-    ret.dashcamOnly = candidate in (CAR.TESLA_MODEL_X,)  # dashcam only, pending find invalidLkasSetting signal
+    ret.dashcamOnly = (candidate in (CAR.TESLA_MODEL_X,) or  # dashcam only, pending find invalidLkasSetting signal
+                       (not das_steering_3_bit and not docs))  # the car's software needs to be updated
 
     # Highland: cooperative steering always on for Tesla installs
     ret.flags |= TeslaFlags.COOP_STEERING.value

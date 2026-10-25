@@ -110,12 +110,8 @@ class CarState(CarStateBase):
     # AEB
     ret.stockAeb = cp_ap_party.vl["DAS_control"]["DAS_aebEvent"] == 1
 
-    # LKAS — 3-bit DAS_steeringControlType (AmyJeanes / opendbc#3389).
-    # Legacy 2-bit EPS FW is flagged LEGACY_DAS_STEERING and shifted into the 3-bit field.
-    steer_control_type = int(cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"])
-    if self.CP.flags & TeslaFlags.LEGACY_DAS_STEERING:
-      steer_control_type >>= 1
-    ret.stockLkas = steer_control_type == 2  # LANE_KEEP_ASSIST
+    # LKAS
+    ret.stockLkas = cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"] == 2  # LANE_KEEP_ASSIST
 
     # Stock Autosteer should be off (includes FSD)
     # TODO: find for TESLA_MODEL_X and HW2.5 vehicles
