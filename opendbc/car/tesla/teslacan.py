@@ -16,18 +16,14 @@ class TeslaCAN:
 
     return self.packer.make_can_msg("DAS_steeringControl", CANBUS.party, values)
 
-  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, jerk_min=None):
+  def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active):
     set_speed = min(max(v_ego + accel, 0) * CV.MS_TO_KPH, 400)
-    # Stock DI jerk is ±4.9. That makes even a small negative DAS_accelMin a regen bite.
-    # Soft Landing passes a shallower jerk_min for cruise-return; lead/FCW keeps the stock limit.
-    if jerk_min is None:
-      jerk_min = CarControllerParams.JERK_LIMIT_MIN
 
     values = {
       "DAS_setSpeed": set_speed,
       "DAS_accState": acc_state,
       "DAS_aebEvent": 0,
-      "DAS_jerkMin": float(jerk_min),
+      "DAS_jerkMin": CarControllerParams.JERK_LIMIT_MIN,
       "DAS_jerkMax": CarControllerParams.JERK_LIMIT_MAX,
       "DAS_accelMin": accel,
       "DAS_accelMax": max(accel, 0),
@@ -39,6 +35,7 @@ class TeslaCAN:
     values = {
       "APS_eacAllow": 1,
     }
+
     return self.packer.make_can_msg("APS_eacMonitor", CANBUS.party, values)
 
 

@@ -1,12 +1,17 @@
+import pytest
 import re
 import unittest
 
-from opendbc.car import gen_empty_fingerprint
+from types import SimpleNamespace
+
+from opendbc.can import CANParser
+from opendbc.car import Bus, DT_CTRL, gen_empty_fingerprint, structs
 from opendbc.car.structs import CarParams
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
-from opendbc.car.tesla.values import CAR
+from opendbc.car.tesla.carcontroller import CarController
+from opendbc.car.tesla.values import CAR, CANBUS, DBC, CarControllerParams
 
 Ecu = CarParams.Ecu
 
@@ -75,3 +80,23 @@ class TestTeslaFingerprint(unittest.TestCase):
         fingerprint[1][RADAR_START_ADDR] = 8
       CP = CarInterface.get_params(CAR.TESLA_MODEL_X, fingerprint, [], False, False, False)
       assert CP.radarUnavailable  # Always unavailable since no radar DBC
+
+
+class TestTeslaLongitudinal(unittest.TestCase):
+  def test_das_jerk_limits_stock(self):
+    # Gentle and hard accels both get the stock DAS jerk limits
+    CP = CarInterface.get_params(CAR.TESLA_MODEL_3, gen_empty_fingerprint(), [], True, False, False)
+    assert CP.openpilotLongitudinalControl
+    CS = SimpleNamespace(out=structs.CarState(vEgo=25., vEgoRaw=25.).as_reader())
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.party], [("DAS_control", 0)], CANBUS.party)
+
+    for accel in (CarControllerParams.ACCEL_MAX, 0.5, 0., -0.2, -0.5, -0.85, -1.5, CarControllerParams.ACCEL_MIN):
+      CC = structs.CarControl(enabled=True, longActive=True, actuators=structs.CarControl.Actuators(accel=accel)).as_reader()
+      for _ in range(4):
+        t = controller.frame * DT_CTRL * 1e9
+        _, can_sends = controller.update(CC, CS, t)
+        parser.update([(int(t), [m for m in can_sends if m[0] == 0x2b9])])
+      assert parser.vl["DAS_control"]["DAS_accelMin"] == pytest.approx(accel, abs=0.05)
+      assert parser.vl["DAS_control"]["DAS_jerkMin"] == pytest.approx(CarControllerParams.JERK_LIMIT_MIN, abs=0.02)
+      assert parser.vl["DAS_control"]["DAS_jerkMax"] == pytest.approx(CarControllerParams.JERK_LIMIT_MAX, abs=0.02)
