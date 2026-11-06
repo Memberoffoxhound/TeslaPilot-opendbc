@@ -46,7 +46,7 @@ class CAR(Platforms):
     [
       TeslaCarDocsHW3("Tesla Model 3 (with HW2.5) 2019"),
       TeslaCarDocsHW3("Tesla Model 3 (with HW3) 2019-23"),
-      TeslaCarDocsHW4("Tesla Model 3 (with HW4) 2024-25"),
+      TeslaCarDocsHW4("Tesla Model 3 (with HW4) 2024-26"),
     ],
     CarSpecs(wheelbase=2.875, steerRatio=12.0),
     {Bus.party: 'tesla_model3_party', Bus.radar: 'tesla_radar_continental_generated'},
@@ -54,7 +54,7 @@ class CAR(Platforms):
   TESLA_MODEL_Y = TeslaPlatformConfig(
     [
       TeslaCarDocsHW3("Tesla Model Y (with HW3) 2020-24"),
-      TeslaCarDocsHW4("Tesla Model Y (with HW4) 2023-25"),
+      TeslaCarDocsHW4("Tesla Model Y (with HW4) 2023-26"),
     ],
     CarSpecs(wheelbase=2.890, steerRatio=12.0),
     {Bus.party: 'tesla_model3_party', Bus.radar: 'tesla_radar_continental_generated'},
