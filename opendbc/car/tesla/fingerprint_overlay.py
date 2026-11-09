@@ -1,4 +1,4 @@
-"""Local EPS firmware additions; shipped recognition always takes priority."""
+"""Validate, load and save local Tesla EPS firmware. The caller owns the file path."""
 import json
 import os
 import re
@@ -9,7 +9,6 @@ from opendbc.car.fingerprints import FW_VERSIONS
 from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car_exact
 from opendbc.car.tesla.values import CAR, Ecu, FW_QUERY_CONFIG
 
-PATH = Path("/data/teslapilot/fingerprints/tesla-fw-v1.json")
 EPS = (Ecu.eps, 0x730, None)
 PLATFORMS = (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y)
 
@@ -42,7 +41,7 @@ def validate(data):
   return result
 
 
-def load(path=PATH):
+def load(path: Path) -> dict:
   try:
     if path.stat().st_size > 16384:
       return {}
@@ -51,12 +50,7 @@ def load(path=PATH):
     return {}
 
 
-def match_local(car_fw, path=PATH):
-  extra = load(path)
-  return match_fw_to_car_exact(build_fw_dict(car_fw, "tesla"), "tesla", extra_fw_versions=extra) if extra else set()
-
-
-def save(platform, car_fw, path=PATH):
+def save(platform, car_fw, path: Path) -> None:
   extra = load(path)
   versions = [f.fwVersion.hex() for f in car_fw if f.brand == "tesla" and not f.logging and
               (f.ecu, f.address, f.subAddress or None) == EPS]

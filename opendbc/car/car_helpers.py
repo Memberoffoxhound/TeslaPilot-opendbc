@@ -6,7 +6,8 @@ from opendbc.car.can_definitions import CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
-from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
+from opendbc.car.fw_versions import MODEL_TO_BRAND, ObdCallback, build_fw_dict, get_fw_versions_ordered, get_present_ecus, \
+  match_fw_to_car, match_fw_to_car_exact
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
@@ -81,7 +82,7 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
 
 # **** for use live only ****
 def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback,
-                cached_params: CarParamsT | None) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
+                cached_params: CarParamsT | None, extra_fw_versions: dict | None = None) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
   disable_fw_cache = os.environ.get('DISABLE_FW_CACHE', False)
@@ -140,11 +141,13 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
     car_fingerprint = fixed_fingerprint
     source = CarParams.FingerprintSource.fixed
 
-  if car_fingerprint is None:
-    from opendbc.car.tesla.fingerprint_overlay import match_local
-    local_matches = match_local(car_fw)
-    if len(local_matches) == 1:
-      car_fingerprint = local_matches.pop()
+  # caller-supplied firmware (e.g. locally learned) only when nothing above identified the car
+  if car_fingerprint is None and extra_fw_versions:
+    extra_matches = set()
+    for brand in {MODEL_TO_BRAND[c] for c in extra_fw_versions if c in MODEL_TO_BRAND}:
+      extra_matches |= match_fw_to_car_exact(build_fw_dict(car_fw, brand), brand, extra_fw_versions=extra_fw_versions)
+    if len(extra_matches) == 1:
+      car_fingerprint = extra_matches.pop()
       source = CarParams.FingerprintSource.fw
 
   carlog.error({"event": "fingerprinted", "car_fingerprint": str(car_fingerprint), "source": source, "fuzzy": not exact_match,
@@ -155,8 +158,9 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
 
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
-            is_release: bool, cached_params: CarParamsT | None = None):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, cached_params)
+            is_release: bool, cached_params: CarParamsT | None = None, extra_fw_versions: dict | None = None):
+  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, cached_params,
+                                                                          extra_fw_versions)
 
   if candidate is None:
     carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
